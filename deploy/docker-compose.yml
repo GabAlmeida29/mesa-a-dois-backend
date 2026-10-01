@@ -1,3 +1,5 @@
+name: mesa-a-dois
+
 services:
   db:
     image: postgres:16-alpine
