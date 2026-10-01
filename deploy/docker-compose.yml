@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mesa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-mesa_a_dois}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mesa} -d ${POSTGRES_DB:-mesa_a_dois}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ..
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: ../.env
+    environment:
+      NODE_ENV: production
+      TRUST_PROXY: 1
+      CORS_ORIGINS: https://${SITE_DOMAIN:-localhost}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mesa}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mesa_a_dois}
+    expose:
+      - '3333'
+    volumes:
+      - uploads:/app/uploads
+
+  web:
+    build:
+      context: ${FRONTEND_PATH:-../../mesa-a-dois-frontend}
+      args:
+        API_INTERNAL_URL: http://api:3333
+    restart: unless-stopped
+    depends_on:
+      - api
+    expose:
+      - '3000'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:
