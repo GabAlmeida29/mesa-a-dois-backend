@@ -1,6 +1,12 @@
 import { z } from 'zod';
+import { SCORE_FIELDS, type ScoreField } from '../domain/criteria';
 
 const rating = z.coerce.number().min(0).max(10).multipleOf(0.5).nullable().optional();
+const scoreShape = Object.fromEntries(SCORE_FIELDS.map((f) => [f, rating])) as Record<
+  ScoreField,
+  typeof rating
+>;
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -30,8 +36,7 @@ export const restaurantSchema = z.object({
   longitude: z.coerce.number().min(-180).max(180),
   logoUrl: optionalText(500),
   priceLevel: z.coerce.number().int().min(1).max(4).nullable().optional(),
-  ratingGabriel: rating,
-  ratingMilena: rating,
+  ...scoreShape,
   review: optionalText(3000),
   visitedAt: z.coerce.date().nullable().optional(),
   wouldReturn: z.boolean().optional(),
@@ -54,4 +59,48 @@ export const listQuerySchema = z.object({
   q: z.string().trim().optional(),
   city: z.string().trim().optional(),
   sort: z.enum(['recent', 'rating', 'name']).default('recent'),
+});
+
+const email = z.string().trim().toLowerCase().email().max(160);
+const newPassword = z.string().min(1).max(200);
+const currentPassword = z.string().min(1).max(200);
+const totpCode = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/);
+
+export const enrollSchema = z.object({
+  enrollmentToken: z.string().min(20).max(100),
+  code: totpCode,
+});
+
+export const reauthSchema = z.object({ currentPassword });
+
+export const createUserSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  email,
+  password: newPassword,
+  currentPassword,
+});
+
+export const updateUserSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  email: email.optional(),
+});
+
+export const setPasswordSchema = z.object({ password: newPassword, currentPassword });
+
+export const collectSchema = z.object({
+  type: z.enum(['pageview', 'click']),
+  path: z.string().trim().min(1).max(300),
+  target: z.string().trim().max(120).optional(),
+  referrer: z.string().trim().max(500).optional(),
+});
+
+export const analyticsQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30),
+  includeAdmin: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 });

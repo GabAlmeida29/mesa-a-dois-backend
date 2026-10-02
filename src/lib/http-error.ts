@@ -3,7 +3,7 @@ export class HttpError extends Error {
     public readonly status: number,
     message: string,
     public readonly details?: unknown,
-    public readonly flags?: Record<string, boolean>,
+    public readonly flags?: Record<string, unknown>,
   ) {
     super(message);
   }

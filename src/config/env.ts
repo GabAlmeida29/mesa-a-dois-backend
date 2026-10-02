@@ -25,6 +25,8 @@ const envSchema = z.object({
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().min(3).default(5),
   LOGIN_LOCK_MINUTES: z.coerce.number().int().min(1).default(15),
   TOTP_ENCRYPTION_KEY: z.string().optional(),
+  GEOIP_ENABLED: bool(true),
+  ANALYTICS_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(395),
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   PUBLIC_BASE_URL: z.string().default(''),
   UPLOAD_DIR: z.string().default('uploads'),

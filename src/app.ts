@@ -8,6 +8,8 @@ import { corsOrigins, env } from './config/env';
 import { authRoutes } from './routes/auth.routes';
 import { restaurantRoutes } from './routes/restaurants.routes';
 import { uploadRoutes } from './routes/upload.routes';
+import { userRoutes } from './routes/users.routes';
+import { analyticsRoutes } from './routes/analytics.routes';
 import { errorHandler } from './middlewares/error';
 import { csrfProtection } from './middlewares/csrf';
 import { HttpError } from './lib/http-error';
@@ -50,6 +52,8 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/restaurants', restaurantRoutes);
   app.use('/api/uploads', uploadRoutes);
+  app.use('/api/users', userRoutes);
+  app.use('/api/analytics', analyticsRoutes);
 
   app.use((_req, _res, next) => next(new HttpError(404, 'Rota não encontrada')));
   app.use(errorHandler);

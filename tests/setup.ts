@@ -10,3 +10,4 @@ process.env.TOTP_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
 process.env.STORAGE_DRIVER = 'local';
 process.env.UPLOAD_DIR = 'tmp-test-uploads';
 process.env.PUBLIC_BASE_URL = '';
+process.env.GEOIP_ENABLED = 'false';

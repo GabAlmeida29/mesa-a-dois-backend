@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createApp } from '../src/app';
 import { db, pool } from '../src/db';
-import { dishes, restaurants, sessions, users } from '../src/db/schema';
+import { analyticsEvents, dishes, restaurants, sessions, users } from '../src/db/schema';
 import { encryptSecret, generateTotpSecret, totpCode, currentStep } from '../src/auth/totp';
 import { env } from '../src/config/env';
 
@@ -23,8 +23,8 @@ const baseRestaurant = {
   city: 'Passo Fundo',
   latitude: -28.2628,
   longitude: -52.4067,
-  ratingGabriel: 9,
-  ratingMilena: 8.5,
+  scoreFood: 9,
+  scoreService: 8.5,
   priceLevel: 2,
   visitedAt: '2026-09-20',
 };
@@ -41,6 +41,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await db.delete(analyticsEvents);
   await db.delete(dishes);
   await db.delete(restaurants);
   await db.delete(sessions);
@@ -241,10 +242,10 @@ describe('restaurantes', () => {
     const res = await agent
       .post('/api/restaurants')
       .set(H)
-      .send({ ...baseRestaurant, latitude: 200, ratingGabriel: 11 });
+      .send({ ...baseRestaurant, latitude: 200, scoreFood: 11 });
     expect(res.status).toBe(400);
     expect(res.body.details).toHaveProperty('latitude');
-    expect(res.body.details).toHaveProperty('ratingGabriel');
+    expect(res.body.details).toHaveProperty('scoreFood');
   });
 
   it('CRUD completo com pratos (sem capa)', async () => {
@@ -270,8 +271,13 @@ describe('restaurantes', () => {
     expect(list.body).toHaveLength(1);
     expect(list.body[0].dishCount).toBe(1);
 
-    const updated = await agent.put(`/api/restaurants/${id}`).set(H).send({ ratingMilena: 10 });
-    expect(updated.body.ratingMilena).toBe(10);
+    const updated = await agent
+      .put(`/api/restaurants/${id}`)
+      .set(H)
+      .send({ scoreCleanliness: 10, scoreWait: 7 });
+    expect(updated.body.scoreCleanliness).toBe(10);
+    expect(updated.body.averageRating).toBe(8.6);
+    expect(updated.body).not.toHaveProperty('ratingGabriel');
 
     expect((await agent.delete(`/api/restaurants/${id}`).set(H)).status).toBe(204);
     expect((await request(app).get(`/api/restaurants/${id}`)).status).toBe(404);
@@ -286,11 +292,11 @@ describe('restaurantes', () => {
     await agent
       .post('/api/restaurants')
       .set(H)
-      .send({ ...baseRestaurant, name: 'A', ratingGabriel: 5, ratingMilena: 5 });
+      .send({ ...baseRestaurant, name: 'A', scoreFood: 5, scoreService: 5 });
     await agent
       .post('/api/restaurants')
       .set(H)
-      .send({ ...baseRestaurant, name: 'B', ratingGabriel: 9, ratingMilena: 9 });
+      .send({ ...baseRestaurant, name: 'B', scoreFood: 9, scoreService: 9 });
     const res = await request(app).get('/api/restaurants?sort=rating');
     expect(res.body.map((r: { name: string }) => r.name)).toEqual(['B', 'A']);
   });

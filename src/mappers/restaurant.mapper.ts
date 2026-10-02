@@ -1,4 +1,5 @@
 import type { Dish, Restaurant } from '../db/schema';
+import { SCORE_FIELDS } from '../domain/criteria';
 
 export function averageRating(...values: Array<number | null | undefined>): number | null {
   const valid = values.filter((v): v is number => typeof v === 'number');
@@ -19,7 +20,7 @@ export function toRestaurantDto(restaurant: Restaurant & { dishes?: Dish[] }) {
   const { dishes = [], ...rest } = restaurant;
   return {
     ...rest,
-    averageRating: averageRating(restaurant.ratingGabriel, restaurant.ratingMilena),
+    averageRating: averageRating(...SCORE_FIELDS.map((f) => restaurant[f])),
     dishCount: dishes.length,
     dishes: dishes.map(toDishDto),
   };

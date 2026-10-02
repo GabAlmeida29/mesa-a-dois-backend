@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+  bigserial,
   boolean,
   date,
   doublePrecision,
@@ -30,6 +31,10 @@ export const users = pgTable('users', {
   lockedUntil: timestamp('locked_until', { withTimezone: true }),
   totpSecret: text('totp_secret'),
   totpLastStep: integer('totp_last_step'),
+  totpPendingSecret: text('totp_pending_secret'),
+  enrollmentTokenHash: varchar('enrollment_token_hash', { length: 64 }),
+  enrollmentExpiresAt: timestamp('enrollment_expires_at', { withTimezone: true }),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -62,8 +67,13 @@ export const restaurants = pgTable(
     longitude: doublePrecision('longitude').notNull(),
     logoUrl: text('logo_url'),
     priceLevel: integer('price_level'),
-    ratingGabriel: doublePrecision('rating_gabriel'),
-    ratingMilena: doublePrecision('rating_milena'),
+    scoreFood: doublePrecision('score_food'),
+    scoreService: doublePrecision('score_service'),
+    scoreAmbience: doublePrecision('score_ambience'),
+    scoreCleanliness: doublePrecision('score_cleanliness'),
+    scoreComfort: doublePrecision('score_comfort'),
+    scoreValue: doublePrecision('score_value'),
+    scoreWait: doublePrecision('score_wait'),
     review: text('review'),
     visitedAt: date('visited_at'),
     wouldReturn: boolean('would_return').notNull().default(true),
@@ -91,6 +101,29 @@ export const dishes = pgTable(
   (t) => [index('dishes_restaurant_id_idx').on(t.restaurantId)],
 );
 
+export const analyticsEvents = pgTable(
+  'analytics_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    type: varchar('type', { length: 16 }).notNull(),
+    path: varchar('path', { length: 300 }).notNull(),
+    target: varchar('target', { length: 120 }),
+    referrerHost: varchar('referrer_host', { length: 200 }),
+    visitorHash: varchar('visitor_hash', { length: 32 }).notNull(),
+    country: varchar('country', { length: 2 }),
+    region: varchar('region', { length: 80 }),
+    city: varchar('city', { length: 80 }),
+    latitude: doublePrecision('latitude'),
+    longitude: doublePrecision('longitude'),
+    device: varchar('device', { length: 16 }),
+    browser: varchar('browser', { length: 32 }),
+    os: varchar('os', { length: 32 }),
+    isAdmin: boolean('is_admin').notNull().default(false),
+  },
+  (t) => [index('analytics_events_occurred_at_idx').on(t.occurredAt)],
+);
+
 export const restaurantsRelations = relations(restaurants, ({ many }) => ({
   dishes: many(dishes),
 }));
@@ -105,3 +138,4 @@ export const dishesRelations = relations(dishes, ({ one }) => ({
 
 export type Restaurant = typeof restaurants.$inferSelect;
 export type Dish = typeof dishes.$inferSelect;
+export type User = typeof users.$inferSelect;
