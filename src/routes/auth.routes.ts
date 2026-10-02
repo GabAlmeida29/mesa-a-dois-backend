@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { env } from '../config/env';
-import { enrollSchema, loginSchema, reauthSchema, updateUserSchema } from '../schemas';
+import { enrollSchema, loginSchema, profileSchema, reauthSchema } from '../schemas';
 import { requireAuth } from '../middlewares/auth';
 import { createSession, destroyAllSessions, destroySession } from '../auth/session';
 import { authService, startEnrollment } from '../services/auth.service';
@@ -47,13 +47,11 @@ authRoutes.post('/logout-others', requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-authRoutes.get('/me', requireAuth, (req, res) => {
+authRoutes.get('/me', requireAuth, async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ user: req.user });
+  res.json({ user: await userService.profile(req.user!.id) });
 });
 
 authRoutes.put('/me', requireAuth, async (req, res) => {
-  const { name } = updateUserSchema.pick({ name: true }).parse(req.body);
-  const user = await userService.update(req.user!.id, { name });
-  res.json({ user: { id: user.id, name: user.name, email: user.email } });
+  res.json({ user: await userService.updateProfile(req.user!.id, profileSchema.parse(req.body)) });
 });

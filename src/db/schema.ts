@@ -35,6 +35,13 @@ export const users = pgTable('users', {
   enrollmentTokenHash: varchar('enrollment_token_hash', { length: 64 }),
   enrollmentExpiresAt: timestamp('enrollment_expires_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  role: varchar('role', { length: 16 }).notNull().default('admin'),
+  permissions: text('permissions').array().notNull().default([]),
+  avatarUrl: text('avatar_url'),
+  headline: varchar('headline', { length: 120 }),
+  bio: varchar('bio', { length: 600 }),
+  instagram: varchar('instagram', { length: 40 }),
+  showOnAbout: boolean('show_on_about').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

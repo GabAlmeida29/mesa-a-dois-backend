@@ -1,9 +1,9 @@
 # Mesa a Dois — API
 
-API REST do **Mesa a Dois**, o diário gastronômico de Gabriel e Milena. Ela guarda restaurantes, pratos, notas e fotos, autentica os administradores, gerencia os usuários, registra os acessos ao site e entrega os dados públicos que o site exibe.
+API REST do **Mesa a Dois**, o diário gastronômico de Gabriel e Milena. Ela guarda restaurantes, pratos, notas e fotos, autentica os usuários, controla o que cada um pode fazer, guarda os perfis exibidos no "Sobre nós", registra os acessos ao site e entrega os dados públicos que o site exibe.
 
-- **Leitura é pública:** qualquer visitante lista e vê restaurantes.
-- **Escrita é restrita:** criar, editar, excluir, enviar imagens, gerenciar usuários e ver o painel de acessos exige uma sessão autenticada com senha e segundo fator (TOTP).
+- **Leitura é pública:** qualquer visitante lista e vê restaurantes e os perfis da equipe.
+- **Escrita é restrita:** criar, editar, excluir, enviar imagens e ver o painel de acessos exige uma sessão autenticada com senha e segundo fator (TOTP) **e a permissão correspondente**. Gerenciar usuários é exclusivo de administradores.
 - **Analytics sem cookies:** o site registra visualizações e cliques sem guardar IP e sem cookie de rastreamento.
 
 ---
@@ -15,17 +15,19 @@ API REST do **Mesa a Dois**, o diário gastronômico de Gabriel e Milena. Ela gu
 3. [Estrutura de pastas](#estrutura-de-pastas)
 4. [Modelo de dados](#modelo-de-dados)
 5. [Autenticação e segurança](#autenticação-e-segurança)
-6. [Gestão de usuários](#gestão-de-usuários)
-7. [Analytics sem cookies](#analytics-sem-cookies)
-8. [Upload e armazenamento de imagens](#upload-e-armazenamento-de-imagens)
-9. [Endpoints](#endpoints)
-10. [Variáveis de ambiente](#variáveis-de-ambiente)
-11. [Rodando localmente](#rodando-localmente)
-12. [Scripts](#scripts)
-13. [Administração de usuários (CLI)](#administração-de-usuários-cli)
-14. [Testes](#testes)
-15. [Migrations](#migrations)
-16. [Docker e produção](#docker-e-produção)
+6. [Papéis e permissões](#papéis-e-permissões)
+7. [Gestão de usuários](#gestão-de-usuários)
+8. [Perfis e equipe](#perfis-e-equipe)
+9. [Analytics sem cookies](#analytics-sem-cookies)
+10. [Upload e armazenamento de imagens](#upload-e-armazenamento-de-imagens)
+11. [Endpoints](#endpoints)
+12. [Variáveis de ambiente](#variáveis-de-ambiente)
+13. [Rodando localmente](#rodando-localmente)
+14. [Scripts](#scripts)
+15. [Administração de usuários (CLI)](#administração-de-usuários-cli)
+16. [Testes](#testes)
+17. [Migrations](#migrations)
+18. [Docker e produção](#docker-e-produção)
 
 ---
 
@@ -56,17 +58,21 @@ HTTP ──► middlewares ──► routes ──► services ──► db (Dri
                 │                       │
                 │                       ├──► mappers (entidade → DTO)
                 │                       └──► storage (disco / S3)
-                └── csrf · auth · error
+                └── csrf · auth (sessão, papel, permissão) · error
 ```
 
 - **routes**: falam HTTP e nada mais. Validam a entrada com Zod, chamam o service e devolvem o status certo.
-- **services**: concentram a regra de negócio, como a busca com filtros, a remoção de imagens substituídas, o login com bloqueio e 2FA, a ativação do 2FA pelo site e a gestão de usuários.
-- **domain**: definições compartilhadas, como a lista dos critérios de avaliação (`criteria.ts`), usada pelos schemas e pelo mapper.
+- **services**: concentram a regra de negócio, como a busca com filtros, a remoção de imagens substituídas, o login com bloqueio e 2FA, a ativação do 2FA pelo site, a gestão de usuários e perfis e o processamento de imagens (`image.service.ts`).
+- **domain**: definições compartilhadas, como a lista dos critérios de avaliação (`criteria.ts`) e os papéis e permissões (`permissions.ts`), usadas pelos schemas, mappers e middlewares.
 - **analytics**: coleta e resumo dos acessos, geolocalização aproximada por IP e leitura do user-agent.
-- **mappers**: transformam linhas do banco em DTOs. É aqui que se calcula a média das notas, converte `numeric` em `number` e conta os pratos.
+- **mappers**: transformam linhas do banco em DTOs.
+  - `restaurant.mapper.ts` calcula a média das notas, converte `numeric` em `number` e conta os pratos;
+  - `user.mapper.ts` monta o usuário da sessão (com as permissões efetivas), o perfil, o usuário da gestão e o membro público da equipe, sem expor hash, segredo ou token.
 - **auth**: guarda as primitivas de segurança (sessão, TOTP, política de senha). Elas são reutilizadas pelas rotas, pelo seed e pela CLI.
 - **middlewares**:
   - `requireAuth` resolve a sessão a partir do cookie;
+  - `requireAdmin` exige, além da sessão, o papel de administrador;
+  - `requirePermission(permissão)` exige a permissão informada (tipada pela lista de `permissions.ts`). Os três usam o mesmo guard, que devolve `401` sem sessão e `403` sem permissão;
   - `csrfProtection` barra escrita vinda de outra origem;
   - `errorHandler` traduz erros em respostas JSON padronizadas.
 
@@ -100,21 +106,24 @@ api/
 │   │   └── password-policy.ts   # regras de senha forte
 │   ├── services/
 │   │   ├── auth.service.ts      # login: bcrypt, bloqueio por tentativas, 2FA, ativação do 2FA, reautenticação
-│   │   ├── user.service.ts      # gestão de usuários: criar, editar, senha, reset de 2FA, desbloqueio, exclusão
+│   │   ├── user.service.ts      # gestão de usuários e acessos, perfil próprio e equipe pública
+│   │   ├── image.service.ts     # reprocessamento das imagens (Sharp → WebP) e gravação no storage
 │   │   └── restaurant.service.ts# CRUD de restaurantes e pratos, busca e limpeza de imagens
 │   ├── analytics/
 │   │   ├── analytics.service.ts # coleta, resumo do painel e limpeza por retenção
 │   │   ├── geoip.ts             # cidade/país aproximados pela base DB-IP local (carregada sob demanda)
 │   │   └── user-agent.ts        # dispositivo, navegador, sistema e detecção de robôs
-│   ├── domain/criteria.ts       # os 7 critérios de avaliação do restaurante
-│   ├── mappers/restaurant.mapper.ts
-│   ├── routes/                  # auth, restaurants (+ dishes), uploads, users, analytics
-│   ├── middlewares/             # auth, csrf, error
+│   ├── domain/
+│   │   ├── criteria.ts          # os 7 critérios de avaliação do restaurante
+│   │   └── permissions.ts       # papéis (admin, member), permissões e permissões efetivas
+│   ├── mappers/                 # restaurant.mapper.ts e user.mapper.ts
+│   ├── routes/                  # auth, restaurants (+ dishes), uploads, users, analytics, team
+│   ├── middlewares/             # auth (requireAuth, requireAdmin, requirePermission), csrf, error
 │   ├── schemas/index.ts         # contratos de entrada (Zod)
 │   ├── storage/index.ts         # driver local e driver S3
 │   ├── lib/                     # HttpError e parse de ids
 │   └── cli/user.ts              # administração de usuários pelo terminal
-├── tests/                       # integração (supertest: api, admin) e unidade (TOTP, senha)
+├── tests/                       # integração (supertest: api, admin, permissions) e unidade (TOTP, senha)
 ├── docker/postgres-init/        # cria o banco de testes no Postgres de desenvolvimento
 ├── docker-compose.dev.yml       # Postgres local (porta 5433)
 └── deploy/                      # produção: docker-compose + Caddy + guia (ver deploy/README.md)
@@ -132,19 +141,26 @@ analytics_events (independente)
 
 ### `users`
 
-| Coluna                  | Tipo        | Descrição                                                         |
-| ----------------------- | ----------- | ----------------------------------------------------------------- |
-| `id`                    | uuid        | PK                                                                |
-| `name`, `email`         | varchar     | e-mail único (minúsculo)                                          |
-| `password_hash`         | text        | bcrypt, custo 12                                                  |
-| `failed_login_attempts` | int         | erros seguidos de senha ou código                                 |
-| `locked_until`          | timestamptz | bloqueio temporário após muitas falhas                            |
-| `totp_secret`           | text        | segredo do 2FA **cifrado** (AES-256-GCM); `null` = sem 2FA        |
-| `totp_last_step`        | int         | último passo TOTP aceito, para impedir reutilizar o mesmo código  |
-| `totp_pending_secret`   | text        | segredo **cifrado** gerado na ativação, ainda não confirmado      |
-| `enrollment_token_hash` | varchar(64) | SHA-256 do token de ativação do 2FA (o token em si nunca é salvo) |
-| `enrollment_expires_at` | timestamptz | validade do token de ativação (10 minutos)                        |
-| `last_login_at`         | timestamptz | último login bem-sucedido (exibido na gestão de usuários)         |
+| Coluna                  | Tipo        | Descrição                                                             |
+| ----------------------- | ----------- | --------------------------------------------------------------------- |
+| `id`                    | uuid        | PK                                                                    |
+| `name`, `email`         | varchar     | e-mail único (minúsculo)                                              |
+| `password_hash`         | text        | bcrypt, custo 12                                                      |
+| `failed_login_attempts` | int         | erros seguidos de senha ou código                                     |
+| `locked_until`          | timestamptz | bloqueio temporário após muitas falhas                                |
+| `totp_secret`           | text        | segredo do 2FA **cifrado** (AES-256-GCM); `null` = sem 2FA            |
+| `totp_last_step`        | int         | último passo TOTP aceito, para impedir reutilizar o mesmo código      |
+| `totp_pending_secret`   | text        | segredo **cifrado** gerado na ativação, ainda não confirmado          |
+| `enrollment_token_hash` | varchar(64) | SHA-256 do token de ativação do 2FA (o token em si nunca é salvo)     |
+| `enrollment_expires_at` | timestamptz | validade do token de ativação (10 minutos)                            |
+| `last_login_at`         | timestamptz | último login bem-sucedido (exibido na gestão de usuários)             |
+| `role`                  | varchar     | `admin` ou `member` (ver [Papéis e permissões](#papéis-e-permissões)) |
+| `permissions`           | text[]      | permissões de um membro; vazio para administradores                   |
+| `avatar_url`            | text        | foto do perfil (pasta `avatars` do storage)                           |
+| `headline`              | varchar     | frase de apresentação (até 120 caracteres)                            |
+| `bio`                   | varchar     | texto "sobre você" (até 600 caracteres)                               |
+| `instagram`             | varchar     | usuário do Instagram, sem `@`                                         |
+| `show_on_about`         | boolean     | mostra o perfil na página "Sobre nós" (`GET /api/team`)               |
 
 ### `sessions`
 
@@ -194,19 +210,19 @@ A **média** não é armazenada: o mapper calcula e arredonda para uma casa deci
 
 ### `analytics_events`
 
-| Coluna                      | Tipo        | Descrição                                                           |
-| --------------------------- | ----------- | ------------------------------------------------------------------- |
-| `id`                        | bigserial   | PK                                                                  |
-| `occurred_at`               | timestamptz | momento do evento (indexado)                                        |
-| `type`                      | varchar     | `pageview` ou `click`                                               |
-| `path`                      | varchar     | caminho da página, **sem query string**                             |
-| `target`                    | varchar     | rótulo do elemento clicado (só em `click`)                          |
-| `referrer_host`             | varchar     | domínio de origem (só quando é outro site)                          |
-| `visitor_hash`              | varchar(32) | hash do visitante com sal que troca todo dia; o IP **não é salvo**  |
-| `country`, `region`, `city` | varchar     | localização aproximada pelo IP                                      |
-| `latitude`, `longitude`     | double      | coordenadas aproximadas da cidade                                   |
-| `device`, `browser`, `os`   | varchar     | lidos do user-agent                                                 |
-| `is_admin`                  | boolean     | `true` quando o acesso veio com uma sessão válida (o próprio casal) |
+| Coluna                      | Tipo        | Descrição                                                            |
+| --------------------------- | ----------- | -------------------------------------------------------------------- |
+| `id`                        | bigserial   | PK                                                                   |
+| `occurred_at`               | timestamptz | momento do evento (indexado)                                         |
+| `type`                      | varchar     | `pageview` ou `click`                                                |
+| `path`                      | varchar     | caminho da página, **sem query string**                              |
+| `target`                    | varchar     | rótulo do elemento clicado (só em `click`)                           |
+| `referrer_host`             | varchar     | domínio de origem (só quando é outro site)                           |
+| `visitor_hash`              | varchar(32) | hash do visitante com sal que troca todo dia; o IP **não é salvo**   |
+| `country`, `region`, `city` | varchar     | localização aproximada pelo IP                                       |
+| `latitude`, `longitude`     | double      | coordenadas aproximadas da cidade                                    |
+| `device`, `browser`, `os`   | varchar     | lidos do user-agent                                                  |
+| `is_admin`                  | boolean     | `true` quando o acesso veio com uma sessão válida (alguém da equipe) |
 
 ---
 
@@ -286,19 +302,65 @@ Isso soma ao `SameSite=Strict` do cookie.
 
 ---
 
+## Papéis e permissões
+
+Cada usuário tem um **papel** (`role`) e, se for membro, uma lista de **permissões** (`src/domain/permissions.ts`):
+
+| Papel    | O que pode fazer                                                       |
+| -------- | ---------------------------------------------------------------------- |
+| `admin`  | tudo, inclusive gerenciar usuários (é o único que acessa `/api/users`) |
+| `member` | só o que estiver em `permissions`, além da própria conta e do perfil   |
+
+| Permissão            | Libera                                                     |
+| -------------------- | ---------------------------------------------------------- |
+| `restaurants:create` | `POST /restaurants`                                        |
+| `restaurants:update` | `PUT /restaurants/:id`                                     |
+| `restaurants:delete` | `DELETE /restaurants/:id`                                  |
+| `dishes:manage`      | criar, editar e excluir pratos (`/restaurants/:id/dishes`) |
+| `analytics:view`     | `GET /analytics/summary`                                   |
+
+- As rotas usam `requirePermission('...')`; as de usuários usam `requireAdmin`. Sem sessão a resposta é `401`; sem permissão, `403 { "message": "Você não tem permissão para esta ação" }`.
+- O administrador tem todas as permissões implicitamente. Por isso a coluna `permissions` fica vazia para ele, e a sessão e o `GET /auth/me` devolvem as **permissões efetivas** (a lista completa).
+- A permissão é lida do banco a cada requisição: uma mudança feita na gestão de usuários vale na hora, sem novo login.
+- Na migration `0004_roles_and_profiles`, os usuários que já existiam viraram administradores. Novos usuários criados pelo site são `member` por padrão.
+
+---
+
 ## Gestão de usuários
 
-Não existe cadastro público. Todo usuário logado é administrador e pode gerenciar os outros pelo site (`/admin/usuarios`):
+Não existe cadastro público. Só **administradores** gerenciam usuários pelo site (`/admin/usuarios`):
 
-- listar usuários, com status do 2FA, bloqueio e último login (sem expor hash, segredo ou token);
-- criar usuário;
-- editar nome e e-mail (e-mail único);
+- listar usuários, com papel, permissões, foto, status do 2FA, bloqueio e último login (sem expor hash, segredo ou token);
+- criar usuário, já escolhendo o papel (`member` por padrão) e as permissões;
+- editar nome, e-mail (e-mail único), papel e permissões;
 - redefinir senha: **encerra as sessões** daquele usuário. Se for a própria senha, a sessão atual é mantida;
 - resetar 2FA: apaga o segredo e encerra as sessões. No próximo login, o usuário ativa o 2FA de novo pelo QR code;
 - desbloquear conta travada por tentativas;
-- excluir usuário. Ninguém exclui a si mesmo, e o último usuário não pode ser excluído.
+- excluir usuário (a foto do perfil é removida do storage junto).
+
+Regras de acesso:
+
+- ninguém altera o **próprio** papel ou as próprias permissões (`400`);
+- é preciso manter **ao menos um administrador**: rebaixar ou excluir o último devolve `400`;
+- ninguém exclui a si mesmo.
 
 Toda senha nova passa pela **política de senha**: 12+ caracteres, 3 tipos entre minúsculas, maiúsculas, números e símbolos, e nenhum termo óbvio. Senha fraca devolve `400` com o motivo em `details.password`.
+
+---
+
+## Perfis e equipe
+
+Todo usuário logado, administrador ou membro, edita o **próprio perfil** com `PUT /api/auth/me`:
+
+- nome, frase de apresentação (`headline`), texto "sobre você" (`bio`) e Instagram;
+- foto (`avatarUrl`), enviada antes para `POST /api/uploads?folder=avatars`. Ao trocar a foto, **o arquivo antigo é apagado** do storage;
+- `showOnAbout`: se o perfil aparece na página "Sobre nós".
+
+O Instagram aceita `@` no começo (que é removido) e só letras, números, `.` e `_`, até 30 caracteres. Vazio vira `null`.
+
+`GET /api/team` é **público** e devolve só os usuários com `showOnAbout`, em ordem de cadastro, com os campos `id`, `name`, `avatarUrl`, `headline`, `bio` e `instagram` (sem e-mail, papel ou qualquer dado de acesso). A resposta tem cache de 60 segundos. O site usa essa rota no "Sobre nós" e nos contatos da página de privacidade.
+
+A migration `0004_roles_and_profiles` preenche a frase, a bio e o Instagram de Gabriel e Milena (pelo nome) e já os mostra no "Sobre nós".
 
 ---
 
@@ -315,10 +377,10 @@ O site envia eventos de visualização e clique para `POST /api/analytics/collec
   - a base é carregada só no primeiro uso e ocupa cerca de **130 MB de RAM**;
   - `GEOIP_ENABLED=false` desliga a geolocalização.
 - **IP nunca é salvo**: o visitante vira um hash de IP + user-agent com um sal aleatório que **troca todo dia**. Dá para contar visitantes únicos no dia, mas não para seguir alguém entre dias.
-- **Acessos do casal**: quando o evento chega com um cookie de sessão válido, ele é marcado com `is_admin = true`.
+- **Acessos da equipe**: quando o evento chega com um cookie de sessão válido, ele é marcado com `is_admin = true`.
 - **Retenção**: o servidor apaga eventos mais antigos que `ANALYTICS_RETENTION_DAYS` (padrão 395 dias) ao subir e depois uma vez por dia.
 
-`GET /api/analytics/summary?days=30&includeAdmin=false` (logado) monta o painel do site:
+`GET /api/analytics/summary?days=30&includeAdmin=false` (permissão `analytics:view`) monta o painel do site:
 
 | Campo                            | Conteúdo                                                         |
 | -------------------------------- | ---------------------------------------------------------------- |
@@ -332,18 +394,18 @@ O site envia eventos de visualização e clique para `POST /api/analytics/collec
 | `recent`                         | 25 últimos eventos                                               |
 
 - `days` vai de 1 a 365 (padrão 30). Os dias são contados no fuso `America/Sao_Paulo`.
-- `includeAdmin=true` inclui os acessos do casal, que por padrão ficam de fora.
+- `includeAdmin=true` inclui os acessos de quem estava logado, que por padrão ficam de fora.
 
 ---
 
 ## Upload e armazenamento de imagens
 
-`POST /api/uploads?folder=logos|dishes` (multipart, campo `file`):
+`POST /api/uploads?folder=logos|dishes|avatars` (multipart, campo `file`, qualquer usuário logado):
 
 1. Aceita só os tipos `image/jpeg`, `png`, `webp`, `avif` e `heic/heif`, até **10 MB**.
-2. O **Sharp reprocessa** a imagem:
+2. O **Sharp reprocessa** a imagem (`src/services/image.service.ts`):
    - corrige a orientação EXIF (fotos de celular);
-   - limita a 1600px no maior lado;
+   - limita o maior lado conforme a pasta: **1600px** em `logos` e `dishes`, **512px** em `avatars`;
    - descarta metadados (como a localização GPS da foto);
    - converte para **WebP** (qualidade 80).
 
@@ -356,7 +418,9 @@ O site envia eventos de visualização e clique para `POST /api/analytics/collec
 | `local` | `UPLOAD_DIR` (padrão `./uploads`), servido em `/uploads` com cache imutável de 1 ano | `/uploads/...` (relativa ao domínio do site) |
 | `s3`    | bucket `S3_BUCKET` em `S3_ENDPOINT`                                                  | `S3_PUBLIC_URL/...`                          |
 
-Quando a imagem de um restaurante ou prato é **substituída** ou o registro é **excluído**, o arquivo antigo é removido do storage.
+Quando a imagem de um restaurante, prato ou a foto de um perfil é **substituída** ou o registro é **excluído**, o arquivo antigo é removido do storage.
+
+O recorte quadrado é feito pelo site antes do envio (quando o navegador consegue abrir o formato); a API só reduz e converte.
 
 ---
 
@@ -364,34 +428,37 @@ Quando a imagem de um restaurante ou prato é **substituída** ou o registro é 
 
 Base: `/api`. Respostas em JSON.
 
-| Método   | Rota                              | Auth | Descrição                                  |
-| -------- | --------------------------------- | ---- | ------------------------------------------ |
-| `GET`    | `/health`                         | —    | `{ "status": "ok" }`                       |
-| `POST`   | `/auth/login`                     | —    | login (cria a sessão)                      |
-| `POST`   | `/auth/2fa/enroll`                | —    | confirma a ativação do 2FA e cria a sessão |
-| `POST`   | `/auth/2fa/setup`                 | ✔    | gera um QR novo para reconfigurar o 2FA    |
-| `POST`   | `/auth/logout`                    | —    | encerra a sessão atual                     |
-| `POST`   | `/auth/logout-others`             | ✔    | encerra as outras sessões                  |
-| `GET`    | `/auth/me`                        | ✔    | usuário logado                             |
-| `PUT`    | `/auth/me`                        | ✔    | altera o próprio nome                      |
-| `GET`    | `/users`                          | ✔    | lista usuários                             |
-| `POST`   | `/users`                          | ✔    | cria usuário                               |
-| `PUT`    | `/users/:id`                      | ✔    | edita nome e/ou e-mail                     |
-| `POST`   | `/users/:id/password`             | ✔    | redefine a senha                           |
-| `POST`   | `/users/:id/reset-2fa`            | ✔    | reseta o 2FA                               |
-| `POST`   | `/users/:id/unlock`               | ✔    | remove o bloqueio por tentativas           |
-| `DELETE` | `/users/:id`                      | ✔    | exclui usuário                             |
-| `POST`   | `/analytics/collect`              | —    | registra visualização ou clique            |
-| `GET`    | `/analytics/summary`              | ✔    | resumo do painel de acessos                |
-| `GET`    | `/restaurants`                    | —    | lista com busca e ordenação                |
-| `GET`    | `/restaurants/:id`                | —    | detalhe com pratos                         |
-| `POST`   | `/restaurants`                    | ✔    | cria restaurante                           |
-| `PUT`    | `/restaurants/:id`                | ✔    | atualiza (parcial)                         |
-| `DELETE` | `/restaurants/:id`                | ✔    | exclui (pratos e imagens juntos)           |
-| `POST`   | `/restaurants/:id/dishes`         | ✔    | adiciona prato                             |
-| `PUT`    | `/restaurants/:id/dishes/:dishId` | ✔    | atualiza prato                             |
-| `DELETE` | `/restaurants/:id/dishes/:dishId` | ✔    | remove prato                               |
-| `POST`   | `/uploads?folder=logos\|dishes`   | ✔    | envia imagem                               |
+Na coluna **Acesso**: `—` é público, `logado` exige sessão, `admin` exige o papel de administrador e os demais valores são a permissão exigida.
+
+| Método   | Rota                                     | Acesso               | Descrição                                        |
+| -------- | ---------------------------------------- | -------------------- | ------------------------------------------------ |
+| `GET`    | `/health`                                | —                    | `{ "status": "ok" }`                             |
+| `POST`   | `/auth/login`                            | —                    | login (cria a sessão)                            |
+| `POST`   | `/auth/2fa/enroll`                       | —                    | confirma a ativação do 2FA e cria a sessão       |
+| `POST`   | `/auth/2fa/setup`                        | logado               | gera um QR novo para reconfigurar o 2FA          |
+| `POST`   | `/auth/logout`                           | —                    | encerra a sessão atual                           |
+| `POST`   | `/auth/logout-others`                    | logado               | encerra as outras sessões                        |
+| `GET`    | `/auth/me`                               | logado               | perfil do usuário logado, com papel e permissões |
+| `PUT`    | `/auth/me`                               | logado               | altera o próprio perfil                          |
+| `GET`    | `/team`                                  | —                    | perfis exibidos no "Sobre nós"                   |
+| `GET`    | `/users`                                 | admin                | lista usuários                                   |
+| `POST`   | `/users`                                 | admin                | cria usuário                                     |
+| `PUT`    | `/users/:id`                             | admin                | edita nome, e-mail, papel e/ou permissões        |
+| `POST`   | `/users/:id/password`                    | admin                | redefine a senha                                 |
+| `POST`   | `/users/:id/reset-2fa`                   | admin                | reseta o 2FA                                     |
+| `POST`   | `/users/:id/unlock`                      | admin                | remove o bloqueio por tentativas                 |
+| `DELETE` | `/users/:id`                             | admin                | exclui usuário                                   |
+| `POST`   | `/analytics/collect`                     | —                    | registra visualização ou clique                  |
+| `GET`    | `/analytics/summary`                     | `analytics:view`     | resumo do painel de acessos                      |
+| `GET`    | `/restaurants`                           | —                    | lista com busca e ordenação                      |
+| `GET`    | `/restaurants/:id`                       | —                    | detalhe com pratos                               |
+| `POST`   | `/restaurants`                           | `restaurants:create` | cria restaurante                                 |
+| `PUT`    | `/restaurants/:id`                       | `restaurants:update` | atualiza (parcial)                               |
+| `DELETE` | `/restaurants/:id`                       | `restaurants:delete` | exclui (pratos e imagens juntos)                 |
+| `POST`   | `/restaurants/:id/dishes`                | `dishes:manage`      | adiciona prato                                   |
+| `PUT`    | `/restaurants/:id/dishes/:dishId`        | `dishes:manage`      | atualiza prato                                   |
+| `DELETE` | `/restaurants/:id/dishes/:dishId`        | `dishes:manage`      | remove prato                                     |
+| `POST`   | `/uploads?folder=logos\|dishes\|avatars` | logado               | envia imagem                                     |
 
 > Rotas de escrita exigem o header `X-Requested-With: mesa-a-dois` e o cookie de sessão.
 
@@ -401,13 +468,13 @@ Base: `/api`. Respostas em JSON.
 { "email": "gabriel@exemplo.com", "password": "Senha-Forte-2026", "code": "123456" }
 ```
 
-| Situação                          | Status | Corpo                                                                   |
-| --------------------------------- | ------ | ----------------------------------------------------------------------- |
-| Sucesso                           | `200`  | `{ "user": { "id", "name", "email" } }` + cookie de sessão              |
-| Credenciais inválidas             | `401`  | `{ "message": "E-mail ou senha inválidos" }`                            |
-| Falta o código 2FA                | `401`  | `{ "message": "...", "mfaRequired": true }`                             |
-| Conta sem 2FA (com `REQUIRE_2FA`) | `403`  | `{ "message": "...", "mfaSetupRequired": true, "enrollment": { ... } }` |
-| Conta bloqueada / rate limit      | `429`  | `{ "message": "Muitas tentativas..." }`                                 |
+| Situação                          | Status | Corpo                                                                                          |
+| --------------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| Sucesso                           | `200`  | `{ "user": { "id", "name", "email", "role", "permissions", "avatarUrl" } }` + cookie de sessão |
+| Credenciais inválidas             | `401`  | `{ "message": "E-mail ou senha inválidos" }`                                                   |
+| Falta o código 2FA                | `401`  | `{ "message": "...", "mfaRequired": true }`                                                    |
+| Conta sem 2FA (com `REQUIRE_2FA`) | `403`  | `{ "message": "...", "mfaSetupRequired": true, "enrollment": { ... } }`                        |
+| Conta bloqueada / rate limit      | `429`  | `{ "message": "Muitas tentativas..." }`                                                        |
 
 Formato do `enrollment`:
 
@@ -426,12 +493,12 @@ Formato do `enrollment`:
 { "enrollmentToken": "Zk3…", "code": "123456" }
 ```
 
-| Situação                   | Status | Corpo                                                      |
-| -------------------------- | ------ | ---------------------------------------------------------- |
-| Sucesso                    | `200`  | `{ "user": { "id", "name", "email" } }` + cookie de sessão |
-| Código inválido            | `400`  | `{ "message": "Código inválido..." }`                      |
-| Token inválido ou expirado | `400`  | `{ "message": "Configuração expirada..." }`                |
-| Conta bloqueada            | `429`  | `{ "message": "Muitas tentativas..." }`                    |
+| Situação                   | Status | Corpo                                                                                          |
+| -------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| Sucesso                    | `200`  | `{ "user": { "id", "name", "email", "role", "permissions", "avatarUrl" } }` + cookie de sessão |
+| Código inválido            | `400`  | `{ "message": "Código inválido..." }`                                                          |
+| Token inválido ou expirado | `400`  | `{ "message": "Configuração expirada..." }`                                                    |
+| Conta bloqueada            | `429`  | `{ "message": "Muitas tentativas..." }`                                                        |
 
 ### `POST /auth/2fa/setup`
 
@@ -443,15 +510,17 @@ Devolve `200` com o mesmo formato do `enrollment`, para confirmar em `POST /auth
 
 ### Usuários
 
-| Rota                        | Corpo                                        | Resposta             |
-| --------------------------- | -------------------------------------------- | -------------------- |
-| `POST /users`               | `{ name, email, password, currentPassword }` | `201` com o usuário  |
-| `PUT /users/:id`            | `{ name?, email? }`                          | `200` com o usuário  |
-| `POST /users/:id/password`  | `{ password, currentPassword }`              | `204`                |
-| `POST /users/:id/reset-2fa` | `{ currentPassword }`                        | `204`                |
-| `POST /users/:id/unlock`    | —                                            | `204`                |
-| `DELETE /users/:id`         | `{ currentPassword }`                        | `204`                |
-| `PUT /auth/me`              | `{ name }`                                   | `200` com `{ user }` |
+| Rota                        | Corpo                                                             | Resposta            |
+| --------------------------- | ----------------------------------------------------------------- | ------------------- |
+| `POST /users`               | `{ name, email, password, currentPassword, role?, permissions? }` | `201` com o usuário |
+| `PUT /users/:id`            | `{ name?, email?, role?, permissions? }`                          | `200` com o usuário |
+| `POST /users/:id/password`  | `{ password, currentPassword }`                                   | `204`               |
+| `POST /users/:id/reset-2fa` | `{ currentPassword }`                                             | `204`               |
+| `POST /users/:id/unlock`    | —                                                                 | `204`               |
+| `DELETE /users/:id`         | `{ currentPassword }`                                             | `204`               |
+
+- `role`: `admin` ou `member` (padrão `member` na criação);
+- `permissions`: lista com valores de [Papéis e permissões](#papéis-e-permissões). Valor desconhecido devolve `400`. Para administradores a lista é ignorada e salva vazia.
 
 Formato do usuário em `GET /users`:
 
@@ -460,6 +529,9 @@ Formato do usuário em `GET /users`:
   "id": "6f1c…",
   "name": "Gabriel",
   "email": "gabriel@exemplo.com",
+  "role": "member",
+  "permissions": ["restaurants:create", "dishes:manage"],
+  "avatarUrl": "/uploads/avatars/2026/….webp",
   "twoFactorEnabled": true,
   "lockedUntil": null,
   "lastLoginAt": "2026-09-30T22:14:05.000Z",
@@ -467,7 +539,51 @@ Formato do usuário em `GET /users`:
 }
 ```
 
-E-mail já usado devolve `409`. Senha fraca devolve `400` com `details.password`.
+Aqui `permissions` traz as permissões **marcadas** (vazia para administradores). E-mail já usado devolve `409`. Senha fraca devolve `400` com `details.password`.
+
+### `GET /auth/me` / `PUT /auth/me`
+
+`GET` devolve o perfil de quem está logado, com as **permissões efetivas** (para um administrador, todas):
+
+```json
+{
+  "user": {
+    "id": "6f1c…",
+    "name": "Milena",
+    "email": "milena@exemplo.com",
+    "role": "admin",
+    "permissions": [
+      "restaurants:create",
+      "restaurants:update",
+      "restaurants:delete",
+      "dishes:manage",
+      "analytics:view"
+    ],
+    "avatarUrl": "/uploads/avatars/2026/….webp",
+    "headline": "Estudante de Psicologia & crítica exigente",
+    "bio": "Repara em cada detalhe…",
+    "instagram": "mih_denardi",
+    "showOnAbout": true
+  }
+}
+```
+
+`PUT` recebe `{ name, headline?, bio?, instagram?, avatarUrl?, showOnAbout? }` e devolve `200` com `{ user }` no mesmo formato. Regras em [Perfis e equipe](#perfis-e-equipe).
+
+### `GET /team`
+
+```json
+[
+  {
+    "id": "6f1c…",
+    "name": "Gabriel",
+    "avatarUrl": "/uploads/avatars/2026/….webp",
+    "headline": "Desenvolvedor & provador oficial de sobremesas",
+    "bio": "Desenvolvedor, curioso por natureza…",
+    "instagram": "gabalmeida29"
+  }
+]
+```
 
 ### `POST /analytics/collect`
 
@@ -608,7 +724,7 @@ cd api
 cp .env.example .env              # defina TOTP_ENCRYPTION_KEY e as senhas do seed
 npm install
 npm run db:migrate                # cria/atualiza as tabelas
-npm run seed                      # cria Gabriel e Milena
+npm run seed                      # cria Gabriel e Milena (administradores)
 npm run dev                       # http://localhost:3333
 ```
 
@@ -663,20 +779,22 @@ Em Docker: `docker compose exec -it api node dist/cli/user.js <comando> <email>`
 npm test
 ```
 
-São 45 testes (`tests/api.test.ts`, `tests/admin.test.ts` e `tests/totp.test.ts`), rodando contra um **Postgres real** (banco `mesa_a_dois_test`, criado pelo `docker-compose.dev.yml`).
+São 53 testes em 4 arquivos (`tests/api.test.ts`, `tests/admin.test.ts`, `tests/permissions.test.ts` e `tests/totp.test.ts`), rodando contra um **Postgres real** (banco `mesa_a_dois_test`, criado pelo `docker-compose.dev.yml`).
 
-| Grupo        | O que valida                                                                                                                                              |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sessão       | cookie `HttpOnly` + `SameSite=Strict`, token salvo só como hash, logout invalida no servidor, cookie forjado ou expirado recusado                         |
-| Força bruta  | bloqueio após 5 erros, mesma mensagem para e-mail inexistente e senha errada                                                                              |
-| 2FA          | exige código, recusa código errado, impede reutilizar o mesmo código, `REQUIRE_2FA` bloqueia contas sem 2FA e derruba sessões antigas                     |
-| CSRF         | escrita sem `X-Requested-With` ou de outra origem → 403                                                                                                   |
-| Ativação 2FA | primeiro login devolve QR e ativa com o código, token expirado recusado, reset força nova ativação, reconfigurar exige senha atual                        |
-| Usuários     | exige login, lista sem expor segredos, criação com reautenticação e senha forte, troca de senha derruba sessões (mantém a própria), exclusão, desbloqueio |
-| Analytics    | não guarda IP, ignora robôs, payload inválido não grava, marca acessos do casal e os exclui do resumo, resumo exige login, user-agent, GeoIP              |
-| Restaurantes | validação, CRUD com pratos, busca por prato, ordenação por nota, id inválido                                                                              |
-| Uploads      | conversão para WebP, URL relativa, arquivo falso recusado                                                                                                 |
-| Unidade      | TOTP contra os vetores da RFC 6238, cifra AES-GCM (inclusive adulteração), política de senha                                                              |
+| Grupo        | O que valida                                                                                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sessão       | cookie `HttpOnly` + `SameSite=Strict`, token salvo só como hash, logout invalida no servidor, cookie forjado ou expirado recusado                                                        |
+| Força bruta  | bloqueio após 5 erros, mesma mensagem para e-mail inexistente e senha errada                                                                                                             |
+| 2FA          | exige código, recusa código errado, impede reutilizar o mesmo código, `REQUIRE_2FA` bloqueia contas sem 2FA e derruba sessões antigas                                                    |
+| CSRF         | escrita sem `X-Requested-With` ou de outra origem → 403                                                                                                                                  |
+| Ativação 2FA | primeiro login devolve QR e ativa com o código, token expirado recusado, reset força nova ativação, reconfigurar exige senha atual                                                       |
+| Usuários     | exige login, lista sem expor segredos, criação com reautenticação e senha forte, troca de senha derruba sessões (mantém a própria), exclusão, desbloqueio                                |
+| Permissões   | usuário existente vira administrador, membro só faz o que foi liberado, mudança vale na hora, não altera o próprio acesso, sempre resta um administrador, permissão inexistente recusada |
+| Perfil       | edição do próprio perfil, `/team` só com quem marcou "Sobre nós", validação do Instagram, avatar reduzido para 512px                                                                     |
+| Analytics    | não guarda IP, ignora robôs, payload inválido não grava, marca acessos logados e os exclui do resumo, resumo exige login, user-agent, GeoIP                                              |
+| Restaurantes | validação, CRUD com pratos, busca por prato, ordenação por nota, id inválido                                                                                                             |
+| Uploads      | conversão para WebP, URL relativa, arquivo falso recusado                                                                                                                                |
+| Unidade      | TOTP contra os vetores da RFC 6238, cifra AES-GCM (inclusive adulteração), política de senha                                                                                             |
 
 Para apontar outro banco de teste: `TEST_DATABASE_URL=postgresql://... npm test`.
 
@@ -692,10 +810,11 @@ Os testes rodam com `GEOIP_ENABLED=false`. O teste de GeoIP liga a geolocalizaç
 
 Em produção, o container aplica as migrations sozinho antes de subir o servidor.
 
-| Migration                             | O que faz                                                                                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0002_criteria_users_analytics`       | adiciona os 7 critérios em `restaurants`, as colunas de ativação do 2FA e `last_login_at` em `users` e cria `analytics_events`              |
-| `0003_drop_restaurant_person_ratings` | remove `rating_gabriel` e `rating_milena` de `restaurants`. **As notas antigas dos restaurantes são descartadas** (as dos pratos continuam) |
+| Migration                             | O que faz                                                                                                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0002_criteria_users_analytics`       | adiciona os 7 critérios em `restaurants`, as colunas de ativação do 2FA e `last_login_at` em `users` e cria `analytics_events`                                                                                                   |
+| `0003_drop_restaurant_person_ratings` | remove `rating_gabriel` e `rating_milena` de `restaurants`. **As notas antigas dos restaurantes são descartadas** (as dos pratos continuam)                                                                                      |
+| `0004_roles_and_profiles`             | adiciona `role`, `permissions`, `avatar_url`, `headline`, `bio`, `instagram` e `show_on_about` em `users`. **Quem já existia vira administrador**; preenche os perfis de Gabriel e Milena (pelo nome) e os mostra no "Sobre nós" |
 
 ---
 

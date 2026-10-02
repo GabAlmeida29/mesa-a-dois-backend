@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { env } from '../config/env';
-import { requireAuth } from '../middlewares/auth';
+import { requirePermission } from '../middlewares/auth';
 import { analyticsQuerySchema, collectSchema } from '../schemas';
 import { analyticsService } from '../analytics/analytics.service';
 
@@ -20,7 +20,7 @@ analyticsRoutes.post('/collect', collectLimiter, async (req, res) => {
   res.status(204).end();
 });
 
-analyticsRoutes.get('/summary', requireAuth, async (req, res) => {
+analyticsRoutes.get('/summary', requirePermission('analytics:view'), async (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(await analyticsService.summary(analyticsQuerySchema.parse(req.query)));
 });

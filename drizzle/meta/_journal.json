@@ -29,6 +29,13 @@
       "when": 1790924568837,
       "tag": "0003_drop_restaurant_person_ratings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790928004246,
+      "tag": "0004_roles_and_profiles",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { and, eq, gt, lt } from 'drizzle-orm';
 import { db } from '../db';
 import { sessions, users } from '../db/schema';
 import { env } from '../config/env';
+import { toSessionUser } from '../mappers/user.mapper';
 
 export const SESSION_COOKIE = env.COOKIE_SECURE ? '__Host-mesa_session' : 'mesa_session';
 
@@ -36,23 +37,15 @@ export async function createSession(req: Request, res: Response, userId: string)
 
 export async function findSession(token: string | undefined) {
   if (!token || token.length > 100) return null;
-  const rows = await db
-    .select({
-      sessionId: sessions.id,
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      hasTotp: users.totpSecret,
-    })
+  const [row] = await db
+    .select({ sessionId: sessions.id, user: users })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.tokenHash, sha256(token)), gt(sessions.expiresAt, new Date())))
     .limit(1);
-  const row = rows[0];
   if (!row) return null;
-
-  if (env.REQUIRE_2FA && !row.hasTotp) return null;
-  return { sessionId: row.sessionId, id: row.id, name: row.name, email: row.email };
+  if (env.REQUIRE_2FA && !row.user.totpSecret) return null;
+  return { sessionId: row.sessionId, user: toSessionUser(row.user) };
 }
 
 export async function destroySession(req: Request, res: Response) {

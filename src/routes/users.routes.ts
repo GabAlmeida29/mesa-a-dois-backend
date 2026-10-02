@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { parseId } from '../lib/params';
-import { requireAuth } from '../middlewares/auth';
+import { requireAdmin } from '../middlewares/auth';
 import { createUserSchema, reauthSchema, setPasswordSchema, updateUserSchema } from '../schemas';
 import { authService } from '../services/auth.service';
 import { userService } from '../services/user.service';
@@ -9,7 +9,7 @@ export const userRoutes = Router();
 
 const userId = (value: unknown) => parseId(value, 'Usuário');
 
-userRoutes.use(requireAuth);
+userRoutes.use(requireAdmin);
 
 userRoutes.get('/', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -23,7 +23,7 @@ userRoutes.post('/', async (req, res) => {
 });
 
 userRoutes.put('/:id', async (req, res) => {
-  res.json(await userService.update(userId(req.params.id), updateUserSchema.parse(req.body)));
+  res.json(await userService.update(userId(req.params.id), updateUserSchema.parse(req.body), req.user!.id));
 });
 
 userRoutes.post('/:id/password', async (req, res) => {

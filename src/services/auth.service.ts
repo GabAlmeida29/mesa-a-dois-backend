@@ -8,6 +8,7 @@ import { users, type User } from '../db/schema';
 import { env } from '../config/env';
 import { HttpError } from '../lib/http-error';
 import { loginSchema } from '../schemas';
+import { toSessionUser } from '../mappers/user.mapper';
 import { decryptSecret, encryptSecret, generateTotpSecret, otpauthUrl, verifyTotp } from '../auth/totp';
 
 type Credentials = z.infer<typeof loginSchema>;
@@ -19,8 +20,6 @@ const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 
 const sha256 = (v: string) => createHash('sha256').update(v).digest('hex');
 const isLocked = (user: User) => Boolean(user.lockedUntil && user.lockedUntil > new Date());
-
-export const toPublicUser = (user: User) => ({ id: user.id, name: user.name, email: user.email });
 
 async function registerFailure(user: User) {
   const attempts = user.failedLoginAttempts + 1;
@@ -95,7 +94,7 @@ export const authService = {
 
     await verifySecondFactor(user, code);
     await markLogin(user);
-    return toPublicUser(user);
+    return toSessionUser(user);
   },
 
   async completeEnrollment(token: string, code: string) {
@@ -125,7 +124,7 @@ export const authService = {
       })
       .where(eq(users.id, user.id));
     await markLogin(user);
-    return toPublicUser(user);
+    return toSessionUser(user);
   },
 
   async confirmPassword(userId: string, password: string) {

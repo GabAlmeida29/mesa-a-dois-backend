@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SCORE_FIELDS, type ScoreField } from '../domain/criteria';
+import { PERMISSIONS, ROLES } from '../domain/permissions';
 
 const rating = z.coerce.number().min(0).max(10).multipleOf(0.5).nullable().optional();
 const scoreShape = Object.fromEntries(SCORE_FIELDS.map((f) => [f, rating])) as Record<
@@ -76,16 +77,41 @@ export const enrollSchema = z.object({
 
 export const reauthSchema = z.object({ currentPassword });
 
+const access = {
+  role: z.enum(ROLES),
+  permissions: z.array(z.enum(PERMISSIONS)).max(PERMISSIONS.length),
+};
+
 export const createUserSchema = z.object({
   name: z.string().trim().min(1).max(80),
   email,
   password: newPassword,
   currentPassword,
+  role: access.role.default('member'),
+  permissions: access.permissions.default([]),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   email: email.optional(),
+  role: access.role.optional(),
+  permissions: access.permissions.optional(),
+});
+
+export const profileSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  headline: optionalText(120),
+  bio: optionalText(600),
+  instagram: z
+    .string()
+    .trim()
+    .transform((v) => v.replace(/^@/, ''))
+    .pipe(z.string().regex(/^[A-Za-z0-9._]{0,30}$/))
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  avatarUrl: optionalText(500),
+  showOnAbout: z.boolean().optional(),
 });
 
 export const setPasswordSchema = z.object({ password: newPassword, currentPassword });

@@ -5,26 +5,16 @@ import { db } from '../db';
 import { sessions, users, type User } from '../db/schema';
 import { HttpError } from '../lib/http-error';
 import { passwordProblem } from '../auth/password-policy';
-import { createUserSchema, updateUserSchema } from '../schemas';
+import { isAdmin, type Role } from '../domain/permissions';
+import { toManagedUserDto, toProfileDto, toTeamMemberDto } from '../mappers/user.mapper';
+import { createUserSchema, profileSchema, updateUserSchema } from '../schemas';
+import { storage } from '../storage';
 
 type CreateUser = Omit<z.infer<typeof createUserSchema>, 'currentPassword'>;
 type UpdateUser = z.infer<typeof updateUserSchema>;
+type ProfileUpdate = z.infer<typeof profileSchema>;
 
 const BCRYPT_COST = 12;
-
-function toUserDto(user: User) {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    twoFactorEnabled: Boolean(user.totpSecret),
-    lockedUntil: user.lockedUntil && user.lockedUntil > new Date() ? user.lockedUntil : null,
-    lastLoginAt: user.lastLoginAt,
-    createdAt: user.createdAt,
-  };
-}
-
-export type UserDto = ReturnType<typeof toUserDto>;
 
 async function hashPassword(password: string) {
   const problem = passwordProblem(password);
@@ -51,6 +41,18 @@ async function assertEmailFree(email: string, exceptId?: string) {
   }
 }
 
+async function adminCount() {
+  const [{ total }] = await db.select({ total: count() }).from(users).where(eq(users.role, 'admin'));
+  return total;
+}
+
+async function assertKeepsAnAdmin(target: User, nextRole?: Role) {
+  const losesAdmin = isAdmin(target) && nextRole !== 'admin';
+  if (losesAdmin && (await adminCount()) <= 1) {
+    throw new HttpError(400, 'É preciso manter ao menos um administrador');
+  }
+}
+
 async function endSessions(userId: string, keepSessionId?: string) {
   await db
     .delete(sessions)
@@ -61,26 +63,73 @@ async function endSessions(userId: string, keepSessionId?: string) {
     );
 }
 
+const accessColumns = (role: Role, permissions: string[]) => ({
+  role,
+  permissions: role === 'admin' ? [] : [...new Set(permissions)],
+});
+
 export const userService = {
   async list() {
     const rows = await db.query.users.findMany({ orderBy: asc(users.createdAt) });
-    return rows.map(toUserDto);
+    return rows.map(toManagedUserDto);
   },
 
-  async create({ name, email, password }: CreateUser) {
+  async team() {
+    const rows = await db.query.users.findMany({
+      where: eq(users.showOnAbout, true),
+      orderBy: asc(users.createdAt),
+    });
+    return rows.map(toTeamMemberDto);
+  },
+
+  async profile(id: string) {
+    return toProfileDto(await findOrFail(id));
+  },
+
+  async create({ name, email, password, role, permissions }: CreateUser) {
     await assertEmailFree(email);
     const [created] = await db
       .insert(users)
-      .values({ name, email, passwordHash: await hashPassword(password) })
+      .values({
+        name,
+        email,
+        passwordHash: await hashPassword(password),
+        ...accessColumns(role, permissions),
+      })
       .returning();
-    return toUserDto(created);
+    return toManagedUserDto(created);
   },
 
-  async update(id: string, data: UpdateUser) {
-    await findOrFail(id);
+  async update(id: string, data: UpdateUser, actingUserId: string) {
+    const target = await findOrFail(id);
     if (data.email) await assertEmailFree(data.email, id);
+
+    const changesAccess = data.role !== undefined || data.permissions !== undefined;
+    if (changesAccess && id === actingUserId) {
+      throw new HttpError(400, 'Você não pode alterar as próprias permissões');
+    }
+    const role = data.role ?? (target.role as Role);
+    if (changesAccess) await assertKeepsAnAdmin(target, role);
+
+    const [updated] = await db
+      .update(users)
+      .set({
+        name: data.name,
+        email: data.email,
+        ...(changesAccess ? accessColumns(role, data.permissions ?? target.permissions) : {}),
+      })
+      .where(eq(users.id, id))
+      .returning();
+    return toManagedUserDto(updated);
+  },
+
+  async updateProfile(id: string, data: ProfileUpdate) {
+    const current = await findOrFail(id);
     const [updated] = await db.update(users).set(data).where(eq(users.id, id)).returning();
-    return toUserDto(updated);
+    if (data.avatarUrl !== undefined && current.avatarUrl && current.avatarUrl !== data.avatarUrl) {
+      await storage.remove(current.avatarUrl);
+    }
+    return toProfileDto(updated);
   },
 
   async setPassword(id: string, password: string, keepSessionId?: string) {
@@ -118,9 +167,9 @@ export const userService = {
 
   async remove(id: string, actingUserId: string) {
     if (id === actingUserId) throw new HttpError(400, 'Você não pode excluir o próprio usuário');
-    await findOrFail(id);
-    const [{ total }] = await db.select({ total: count() }).from(users);
-    if (total <= 1) throw new HttpError(400, 'É preciso manter ao menos um usuário');
+    const target = await findOrFail(id);
+    await assertKeepsAnAdmin(target);
     await db.delete(users).where(eq(users.id, id));
+    if (target.avatarUrl) await storage.remove(target.avatarUrl);
   },
 };
