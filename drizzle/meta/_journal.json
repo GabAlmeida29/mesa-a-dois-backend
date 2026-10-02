@@ -36,6 +36,13 @@
       "when": 1790928004246,
       "tag": "0004_roles_and_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790954648523,
+      "tag": "0005_restore_about_profiles",
+      "breakpoints": true
     }
   ]
 }
