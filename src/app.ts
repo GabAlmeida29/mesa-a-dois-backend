@@ -1,3 +1,4 @@
+import './lib/zod-pt';
 import path from 'node:path';
 import express from 'express';
 import cors from 'cors';

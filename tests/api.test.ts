@@ -346,3 +346,15 @@ describe('uploads', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('mensagens de validação', () => {
+  it('responde em português indicando o campo', async () => {
+    const agent = await loggedAgent();
+    const res = await agent
+      .post('/api/restaurants')
+      .set(H)
+      .send({ ...baseRestaurant, description: 'x'.repeat(501) });
+    expect(res.status).toBe(400);
+    expect(res.body.details.description[0]).toBe('Máximo de 500 caracteres');
+  });
+});
