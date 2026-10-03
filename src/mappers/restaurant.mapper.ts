@@ -1,7 +1,7 @@
 import type { Dish, Restaurant } from '../db/schema';
 import { SCORE_FIELDS } from '../domain/criteria';
 
-export function averageRating(...values: Array<number | null | undefined>): number | null {
+function averageRating(...values: Array<number | null | undefined>): number | null {
   const valid = values.filter((v): v is number => typeof v === 'number');
   if (!valid.length) return null;
   const mean = valid.reduce((sum, v) => sum + v, 0) / valid.length;
