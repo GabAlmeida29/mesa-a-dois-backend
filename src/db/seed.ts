@@ -11,7 +11,7 @@ interface SeedUser {
   name: string;
   email?: string;
   password?: string;
-  profile: { avatarUrl: string; instagram: string; headline: string; bio: string };
+  profile: { instagram: string; headline: string; bio: string };
 }
 
 const SEED_USERS: SeedUser[] = [
@@ -20,7 +20,6 @@ const SEED_USERS: SeedUser[] = [
     email: process.env.SEED_GABRIEL_EMAIL,
     password: process.env.SEED_GABRIEL_PASSWORD,
     profile: {
-      avatarUrl: '/about/gabriel.webp',
       instagram: 'gabalmeida29',
       headline: 'Desenvolvedor & provador oficial de sobremesas',
       bio: 'Desenvolvedor, curioso por natureza. Construiu este site e não recusa um bom hambúrguer artesanal — nem uma segunda sobremesa.',
@@ -31,7 +30,6 @@ const SEED_USERS: SeedUser[] = [
     email: process.env.SEED_MILENA_EMAIL,
     password: process.env.SEED_MILENA_PASSWORD,
     profile: {
-      avatarUrl: '/about/milena.webp',
       instagram: 'mih_denardi',
       headline: 'Estudante de Psicologia & crítica exigente',
       bio: 'Repara em cada detalhe: do atendimento ao empratamento. É quem escolhe os lugares novos e quem dá a palavra final sobre voltar ou não.',
@@ -61,7 +59,6 @@ async function upsertUser({ name, email, password, profile }: SeedUser) {
         passwordHash,
         failedLoginAttempts: 0,
         lockedUntil: null,
-        avatarUrl: keepExisting(users.avatarUrl, profile.avatarUrl),
         instagram: keepExisting(users.instagram, profile.instagram),
         headline: keepExisting(users.headline, profile.headline),
         bio: keepExisting(users.bio, profile.bio),
